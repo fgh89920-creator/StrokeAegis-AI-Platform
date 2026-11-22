@@ -35,7 +35,8 @@ export const LandingScreen: React.FC = () => {
   const isRtl = ui.getLanguage() === 'ar';
   const busy = core.isLoading('auth');
 
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  // Sign-in only: public self-registration is disabled so nobody but an approved doctor can upload scans.
+  const authMode = 'signin' as 'signin' | 'signup';
   const [selectedRole, setSelectedRole] = useState<'doctor' | 'patient'>('doctor');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -51,11 +52,6 @@ export const LandingScreen: React.FC = () => {
   const [gender, setGender] = useState<'' | 'Male' | 'Female' | 'Other'>('');
   const [emergencyContact, setEmergencyContact] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const switchMode = (mode: 'signin' | 'signup') => {
-    setAuthMode(mode);
-    setErrorMsg(null);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,22 +225,6 @@ export const LandingScreen: React.FC = () => {
     );
   };
 
-  const tabBtn = (mode: 'signin' | 'signup', labelAr: string, labelEn: string) => (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={authMode === mode}
-      onClick={() => switchMode(mode)}
-      className={`h-10 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-        authMode === mode
-          ? 'bg-white dark:bg-[#0C1B21] text-[#0E7490] dark:text-[#22D3EE] shadow-xs'
-          : 'text-[#5B6B7A] dark:text-[#8CA3AF] hover:text-[#0F2A2E] dark:hover:text-white'
-      }`}
-    >
-      {ui.t(labelAr, labelEn)}
-    </button>
-  );
-
   return (
     <div id="screen-landing" className="min-h-[calc(100vh-4rem)] flex flex-col justify-between">
       <main className="max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 space-y-12">
@@ -291,31 +271,22 @@ export const LandingScreen: React.FC = () => {
                   </div>
                   <div className="relative z-10 space-y-2.5 text-center sm:text-start flex-1">
                     <div className="text-xs font-bold text-[#047857] dark:text-[#10B981]">
-                      {ui.t('جرّب النماذج مباشرة أو سجّل دخولك', 'Try the models directly or sign in')}
+                      {ui.t('بيئة سريرية محمية', 'A protected clinical workspace')}
                     </div>
                     <p className="text-sm text-[#0F2A2E] dark:text-[#ECF6F8] leading-relaxed">
                       {ui.t(
-                        'يمكنك تشغيل النماذج المباشرة ومعالج الذكاء الاصطناعي دون حساب. سجّل دخولك لحفظ التحليلات في ملف المريض والتواصل مع طبيبك.',
-                        'You can run the live models and the AI wizard without an account. Sign in to save analyses to a patient record and talk to your care team.'
+                        'رفع صور الأشعة المقطعية وتشغيل نماذج الذكاء الاصطناعي ووكلاء التقرير متاح للأطباء المعتمدين فقط بعد تسجيل الدخول. المرضى يتابعون تقاريرهم ويتواصلون مع طبيبهم من بوابتهم.',
+                        'Uploading CT scans and running the AI models and report agents is limited to approved doctors after sign-in. Patients follow their reports and message their doctor from their own portal.'
                       )}
                     </p>
-                    <div className="pt-1 flex flex-wrap items-center justify-center sm:justify-start gap-3">
-                      <button
-                        type="button"
-                        onClick={() => core.navigate('screen-ai-system')}
-                        className="h-10 px-4 rounded-[10px] bg-[#0E7490] hover:bg-[#0B5C73] text-white text-xs font-semibold flex items-center gap-2 transition-all hover:scale-[1.03] shadow-xs cursor-pointer"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>{ui.t('تشغيل نظام الذكاء الاصطناعي (4 خطوات)', 'Launch 4-Step AI Wizard')}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => core.navigate('screen-home')}
-                        className="h-10 px-4 rounded-[10px] border border-[#D7E3E6] dark:border-[#1B3540] bg-white/80 dark:bg-[#0C1B21]/80 hover:border-[#0E7490] text-xs font-semibold text-[#0F2A2E] dark:text-[#ECF6F8] flex items-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
-                      >
-                        <span>{ui.t('استعراض أنظمة التحليل', 'Explore Analysis Modes')}</span>
-                        {isRtl ? <ArrowLeft className="w-3.5 h-3.5" /> : <ArrowRight className="w-3.5 h-3.5" />}
-                      </button>
+                    <div className="pt-1 flex flex-wrap items-center justify-center sm:justify-start gap-2 text-[11px] font-bold">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0E7490]/10 text-[#0E7490] dark:text-[#22D3EE]">
+                        <Zap className="w-3 h-3" />
+                        {ui.t('للأطباء المعتمدين فقط', 'Approved doctors only')}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#047857]/10 text-[#047857] dark:text-[#10B981]">
+                        {ui.t('كل تحليل يُحفظ في ملف المريض', 'Every analysis is saved to the patient record')}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -372,13 +343,16 @@ export const LandingScreen: React.FC = () => {
             >
               <div className="h-full flex flex-col justify-between space-y-6">
                 <div className="space-y-5">
-                  <div
-                    role="tablist"
-                    aria-label={ui.t('تبويبات الدخول والتسجيل', 'Authentication mode')}
-                    className="grid grid-cols-2 p-1 rounded-xl bg-[#F0F6F7] dark:bg-[#11252D] border border-[#D7E3E6] dark:border-[#1B3540]"
-                  >
-                    {tabBtn('signin', 'تسجيل الدخول', 'Sign In')}
-                    {tabBtn('signup', 'إنشاء حساب جديد', 'Create Account')}
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-extrabold text-[#0F2A2E] dark:text-[#ECF6F8]">
+                      {ui.t('تسجيل الدخول', 'Sign In')}
+                    </h2>
+                    <p className="text-[11px] text-[#5B6B7A] dark:text-[#8CA3AF]">
+                      {ui.t(
+                        'الحسابات تُنشأ من إدارة المنصة. رفع صور الأشعة وتشغيل التحليل للأطباء المعتمدين فقط.',
+                        'Accounts are issued by the platform admin. CT upload and analysis are for approved doctors only.'
+                      )}
+                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -679,14 +653,6 @@ export const LandingScreen: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-4">
-            <button type="button" onClick={() => core.navigate('screen-home')} className="hover:text-[#0E7490] transition-colors cursor-pointer">
-              {ui.t('أنظمة التحليل', 'Analysis Suite')}
-            </button>
-            <span aria-hidden="true">·</span>
-            <button type="button" onClick={() => core.navigate('screen-ai-system')} className="hover:text-[#0E7490] transition-colors cursor-pointer">
-              {ui.t('معالج الـ 4 خطوات', '4-Step AI Wizard')}
-            </button>
-            <span aria-hidden="true">·</span>
             <button type="button" onClick={() => core.openModal('chatbot-modal')} className="hover:text-[#0E7490] transition-colors cursor-pointer">
               {ui.t('المساعد الطبي الذكي', 'Clinical AI Assistant')}
             </button>

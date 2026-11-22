@@ -61,11 +61,16 @@ export const SharedHeader: React.FC = () => {
               ? { ar: 'حالة الحساب', en: 'Account Status' }
               : { ar: 'الرئيسية والدخول', en: 'Home & Sign In' };
 
+  // analysis screens (CT upload, models) are shown to approved doctors only
   const navItems: { id: ScreenId; labelAr: string; labelEn: string }[] = [
     { id: homeScreen, labelAr: homeLabel.ar, labelEn: homeLabel.en },
-    { id: 'screen-home', labelAr: 'أنظمة التحليل', labelEn: 'Analysis Systems' },
-    { id: 'screen-ai-system', labelAr: 'النظام الذكي (4 خطوات)', labelEn: '4-Step AI Wizard' },
-    { id: 'screen-regular-system', labelAr: 'النماذج المباشرة', labelEn: 'Live Models' },
+    ...(core.canUseAnalysis()
+      ? ([
+          { id: 'screen-home', labelAr: 'أنظمة التحليل', labelEn: 'Analysis Systems' },
+          { id: 'screen-ai-system', labelAr: 'النظام الذكي (4 خطوات)', labelEn: '4-Step AI Wizard' },
+          { id: 'screen-regular-system', labelAr: 'النماذج المباشرة', labelEn: 'Live Models' },
+        ] as { id: ScreenId; labelAr: string; labelEn: string }[])
+      : []),
   ];
 
   const displayName = user ? ui.t(user.nameAr || user.name, user.name || user.nameAr) : '';

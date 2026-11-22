@@ -120,8 +120,13 @@ export const api = {
 
 /** PDF download for portal reports. Uses the token in the header, then saves the blob. */
 export async function downloadReportPdf(reportId: string, filename: string | null): Promise<void> {
+  return downloadFile(`/api/clinical-portal/reports/${encodeURIComponent(reportId)}/download`, filename || `report-${reportId}.pdf`);
+}
+
+/** Authenticated download of any protected file (plain <a href> links cannot carry the token). */
+export async function downloadFile(path: string, filename: string): Promise<void> {
   const token = getToken();
-  const res = await fetch(`/api/clinical-portal/reports/${encodeURIComponent(reportId)}/download`, {
+  const res = await fetch(path, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (res.status === 401) {
@@ -133,7 +138,7 @@ export async function downloadReportPdf(reportId: string, filename: string | nul
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename || `report-${reportId}.pdf`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();

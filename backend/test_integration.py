@@ -17,7 +17,12 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
+from types import SimpleNamespace
 from backend.app import app
+from backend.auth.dependencies import require_doctor
+
+# Analysis endpoints require an approved doctor; these tests exercise the models, not auth.
+app.dependency_overrides[require_doctor] = lambda: SimpleNamespace(role="doctor", doctor_profile=None)
 
 client = TestClient(app)
 SAMPLES_DIR = PROJECT_ROOT / "sample_scans"

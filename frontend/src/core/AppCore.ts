@@ -79,6 +79,9 @@ import {
   VascularRiskResult,
 } from './types';
 
+/** Screens that upload CT scans / run the models — doctors only. */
+const ANALYSIS_SCREENS: ScreenId[] = ['screen-home', 'screen-ai-system', 'screen-regular-system'];
+
 type Listener = () => void;
 
 const THEME_KEY = 'strokeaegis_theme';
@@ -406,6 +409,11 @@ export class StrokeAegisCore {
   public getCurrentUser(): UserProfile | null {
     return this.currentUser;
   }
+  /** CT upload, the risk model and the agent pipeline are clinician work: approved doctors only. */
+  public canUseAnalysis(): boolean {
+    const u = this.currentUser;
+    return !!u && u.role === 'doctor' && u.status === 'active' && u.isActive;
+  }
   public getCtPresets(): CtSamplePreset[] {
     return this.ctPresets;
   }
@@ -507,6 +515,7 @@ export class StrokeAegisCore {
           : u?.role === 'admin'
             ? { id: 'screen-admin-dashboard', labelAr: 'لوحة الحوكمة', labelEn: 'Admin Governance' }
             : { id: 'screen-landing', labelAr: 'الرئيسية والدخول', labelEn: 'Home & Sign In' };
+    if (!this.canUseAnalysis()) return [roleScreen];
     return [
       roleScreen,
       { id: 'screen-home', labelAr: 'بوابات التحليل', labelEn: 'Analysis Suite' },
@@ -516,6 +525,14 @@ export class StrokeAegisCore {
   }
 
   public navigate(screen: ScreenId): void {
+    if (ANALYSIS_SCREENS.includes(screen) && !this.canUseAnalysis()) {
+      this.toast(
+        'info',
+        'أنظمة التحليل ورفع صور الأشعة متاحة للأطباء المعتمدين فقط. سجّل دخولك بحساب طبيب.',
+        'Analysis and CT upload are available to approved doctors only. Sign in with a doctor account.'
+      );
+      screen = this.currentUser ? this.homeScreenFor(this.currentUser) : 'screen-landing';
+    }
     const deck = this.getSwipeableScreens().map((s) => s.id);
     const oldIdx = deck.indexOf(this.currentScreen);
     const newIdx = deck.indexOf(screen);
@@ -1199,6 +1216,7 @@ export class StrokeAegisCore {
   }
 
   public launchAiWizardForPatient(patientId: string | null): void {
+    if (!this.canUseAnalysis()) return this.navigate('screen-ai-system'); // shows the doctors-only notice
     this.closeEventSource();
     this.wizardTargetPatientId = patientId;
     this.wizardStep = 1;
@@ -1345,7 +1363,8 @@ export class StrokeAegisCore {
   }
 
   private listenToPipeline(pipelineId: string): void {
-    const es = new EventSource(`/api/clinical/stream/${pipelineId}`);
+    // EventSource cannot send headers, so the doctor's token rides in the query string.
+    const es = new EventSource(`/api/clinical/stream/${pipelineId}?token=${encodeURIComponent(getToken() || '')}`);
     this.wizardEventSource = es;
     let finished = false;
     es.onmessage = (e) => {

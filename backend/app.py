@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
@@ -127,6 +127,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Authentication & User Management Router (Phase 1 Foundation)
 from backend.auth.router import router as auth_router
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+
+# Analysis endpoints (CT upload, risk model, agent pipeline) are clinician work:
+# only approved doctors may call them.
+from backend.auth.dependencies import require_doctor
+from backend.database.models import User
 
 # Clinical Decision Support & Role Dashboards Router (Phase 2)
 from backend.clinical.router import router as clinical_router
@@ -290,7 +295,7 @@ def get_presets():
 # =====================================================================
 
 @app.post("/api/predict-risk")
-def predict_stroke_risk(patient: PatientInput):
+def predict_stroke_risk(patient: PatientInput, _doctor: User = Depends(require_doctor)):
     """Path A: Direct Tabular ML Stroke Risk Prediction."""
     try:
         res = ml_risk_engine.predict(patient.model_dump())
@@ -300,7 +305,7 @@ def predict_stroke_risk(patient: PatientInput):
 
 
 @app.post("/api/verify-gate")
-async def verify_door_gate(file: UploadFile = File(...)):
+async def verify_door_gate(file: UploadFile = File(...), _doctor: User = Depends(require_doctor)):
     """Gatekeeper Door Model verification."""
     try:
         contents = await file.read()
@@ -311,7 +316,7 @@ async def verify_door_gate(file: UploadFile = File(...)):
 
 
 @app.post("/api/diagnose-ct")
-async def diagnose_ct_pipeline(file: UploadFile = File(...)):
+async def diagnose_ct_pipeline(file: UploadFile = File(...), _doctor: User = Depends(require_doctor)):
     """Path B: Direct Brain CT Diagnosis & Explainability."""
     try:
         contents = await file.read()
@@ -344,7 +349,8 @@ async def diagnose_ct_pipeline(file: UploadFile = File(...)):
 @app.post("/api/clinical/start-analysis")
 async def start_clinical_pipeline(
     patient_json: str = Form(...),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    _doctor: User = Depends(require_doctor),
 ):
     """
     Launches the full AI System CrewAI Flow in the background.
@@ -373,7 +379,8 @@ async def start_clinical_pipeline(
 
 
 @app.get("/api/clinical/stream/{pipeline_id}")
-async def stream_pipeline_events(pipeline_id: str):
+async def stream_pipeline_events(pipeline_id: str, _doctor: User = Depends(require_doctor)):
+    # EventSource cannot send headers: the frontend passes the JWT as ?token=
     """
     Server-Sent Events (SSE) stream yielding real-time agent execution status,
     medical robot animation transitions, and final report payload.
@@ -390,7 +397,7 @@ async def stream_pipeline_events(pipeline_id: str):
 
 
 @app.get("/api/clinical/result/{pipeline_id}")
-def get_pipeline_result(pipeline_id: str):
+def get_pipeline_result(pipeline_id: str, _doctor: User = Depends(require_doctor)):
     """
     Polling endpoint returning status, logs, and completed report.
     """
@@ -412,7 +419,8 @@ def get_pipeline_result(pipeline_id: str):
 @app.post("/api/clinical/complete-analysis")
 async def execute_complete_analysis_sync(
     patient_json: str = Form(...),
-    file: Optional[UploadFile] = File(None)
+    file: Optional[UploadFile] = File(None),
+    _doctor: User = Depends(require_doctor),
 ):
     """
     Synchronous end-to-end execution of the complete AI System.
@@ -446,7 +454,7 @@ async def execute_complete_analysis_sync(
 # =====================================================================
 
 @app.post("/api/agents/prevention")
-def query_prevention_agent(patient: PatientInput):
+def query_prevention_agent(patient: PatientInput, _doctor: User = Depends(require_doctor)):
     """Standalone query to the Stroke Prevention Agent."""
     try:
         ml_res = ml_risk_engine.predict(patient.model_dump())
@@ -457,7 +465,7 @@ def query_prevention_agent(patient: PatientInput):
 
 
 @app.post("/api/agents/emergency")
-async def query_emergency_agent(file: UploadFile = File(...)):
+async def query_emergency_agent(file: UploadFile = File(...), _doctor: User = Depends(require_doctor)):
     """Standalone query to the Acute Stroke Emergency Agent."""
     try:
         contents = await file.read()
@@ -479,7 +487,7 @@ async def query_emergency_agent(file: UploadFile = File(...)):
 
 
 @app.get("/api/reports/download-pdf/{filename_or_id}")
-def download_pdf_report(filename_or_id: str):
+def download_pdf_report(filename_or_id: str, _doctor: User = Depends(require_doctor)):
     """Serves the generated PDF report."""
     fname = filename_or_id if filename_or_id.endswith(".pdf") else f"{filename_or_id}.pdf"
     file_path = REPORTS_DIR / fname

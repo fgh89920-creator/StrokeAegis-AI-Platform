@@ -25,6 +25,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { useAppCore } from '../core/useAppCore';
+import { downloadFile } from '../core/api';
 import { CrewAgentState, CtSamplePreset, RiskTier, VascularInputProfile, VascularRiskResult } from '../core/types';
 import { CtGradCamViewer, ctDiagnosisText, ctDiagnosisTone } from './CtGradCamViewer';
 import { AnimatedCounter, CerebrovascularWaveSvg, SpotlightTiltCard } from './LuxuryMotion';
@@ -424,6 +425,171 @@ const agentStatusText = (a: CrewAgentState, ui: Translator) =>
         ? ui.t('قيد التشغيل', 'Running')
         : ui.t('في الانتظار', 'Queued');
 
+/** Friendly names for the backend's SSE event sources. */
+const STAGE_NAMES: Record<string, [string, string]> = {
+  pipeline: ['منسّق التحليل', 'Pipeline'],
+  ml_risk: ['نموذج تقدير خطر السكتة', 'Stroke-risk model'],
+  ct_gate: ['بوابة التحقق من صورة الأشعة', 'CT validity gate'],
+  ct_classifier: ['مصنّف الأشعة المقطعية', 'CT classifier'],
+  prevention: ['وكيل الوقاية', 'Prevention agent'],
+  emergency: ['وكيل الطوارئ', 'Emergency agent'],
+  validation: ['وكيل التحقق السريري', 'Validation agent'],
+  report: ['وكيل كتابة التقرير', 'Report agent'],
+};
+
+interface TimelineEntry {
+  time: string;
+  stage: string;
+  message: string;
+  tone: 'done' | 'failed' | 'working';
+}
+
+/** Turns `[hh:mm:ss] agent: message` log lines into readable timeline entries. */
+function parseLog(line: string): TimelineEntry {
+  const m = /^\[(\d{2}:\d{2}:\d{2})\]\s*(?:([a-z_]+):\s*)?(.*)$/i.exec(line);
+  const time = m?.[1] ?? '';
+  const stage = m?.[2] && STAGE_NAMES[m[2]] ? m[2] : 'pipeline';
+  const message = (m?.[2] && !STAGE_NAMES[m[2]] ? `${m[2]}: ` : '') + (m?.[3] ?? line);
+  const tone = /error|fail|reject/i.test(message) ? 'failed' : /complet|done|finish|passed|ready|accepted/i.test(message) ? 'done' : 'working';
+  return { time, stage, message, tone };
+}
+
+interface PipelineTimelineProps {
+  logs: string[];
+  agents: CrewAgentState[];
+  running: boolean;
+  failed: boolean;
+  pipelineId: string | null;
+  logRef: React.RefObject<HTMLDivElement | null>;
+  onOpenReport?: () => void;
+  NextIcon: React.ComponentType<{ className?: string }>;
+}
+
+/** Light, readable progress view of the agent pipeline (replaces the raw console). */
+const PipelineTimeline: React.FC<PipelineTimelineProps> = ({ logs, agents, running, failed, pipelineId, logRef, onOpenReport, NextIcon }) => {
+  const { ui } = useAppCore();
+  const overall = agents.length
+    ? Math.round(agents.reduce((s, a) => s + Math.max(0, Math.min(100, a.progress)), 0) / agents.length)
+    : 0;
+  const entries = logs.map(parseLog);
+  const pct = onOpenReport ? 100 : overall;
+
+  const statusLine = failed
+    ? ui.t('توقف التحليل', 'Analysis stopped')
+    : onOpenReport
+      ? ui.t('اكتمل التحليل وجاهز التقرير', 'Analysis complete — report ready')
+      : running
+        ? ui.t('الوكلاء يعملون على الحالة...', 'Agents are working on the case...')
+        : ui.t('بانتظار بدء التحليل', 'Waiting to start');
+
+  const dot = (tone: TimelineEntry['tone']) =>
+    tone === 'done'
+      ? 'bg-[#047857] ring-[#047857]/20'
+      : tone === 'failed'
+        ? 'bg-[#DC2626] ring-[#DC2626]/20'
+        : 'bg-[#0E7490] ring-[#0E7490]/20';
+
+  return (
+    <div className={`${cardCls} p-5 sm:p-6 space-y-5`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              failed
+                ? 'bg-[#DC2626]/10 text-[#DC2626]'
+                : onOpenReport
+                  ? 'bg-[#047857]/10 text-[#047857] dark:text-[#10B981]'
+                  : 'bg-[#0E7490]/10 text-[#0E7490] dark:text-[#22D3EE]'
+            }`}
+          >
+            {failed ? <XCircle className="w-5 h-5" /> : onOpenReport ? <CheckCircle2 className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
+          </div>
+          <div>
+            <h3 className="text-sm font-extrabold text-[#0F2A2E] dark:text-[#ECF6F8]">{ui.t('سير التحليل', 'Analysis progress')}</h3>
+            <p className="text-xs text-[#5B6B7A] dark:text-[#8CA3AF] flex items-center gap-1.5">
+              {running && <Loader2 className="w-3 h-3 animate-spin" />}
+              {statusLine}
+            </p>
+          </div>
+        </div>
+        {onOpenReport && (
+          <button type="button" onClick={onOpenReport} className="h-10 px-4 rounded-[10px] bg-[#0E7490] hover:bg-[#0B5C73] text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow-xs">
+            {ui.t('عرض حزمة القرار السريري', 'Open Clinical Decision Package')}
+            <NextIcon className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-[11px] font-bold text-[#5B6B7A] dark:text-[#8CA3AF]">
+          <span>{ui.t('التقدم الكلي', 'Overall')}</span>
+          <span className="font-mono-tabular">{pct}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-[#F0F6F7] dark:bg-[#11252D] overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ${
+              failed ? 'bg-[#DC2626]' : pct >= 100 ? 'bg-[#047857]' : 'bg-gradient-to-l from-[#22D3EE] to-[#0E7490]'
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      <div ref={logRef} className="max-h-72 overflow-y-auto pe-1">
+        {entries.length === 0 ? (
+          <div className="py-6 text-center text-xs text-[#5B6B7A] dark:text-[#8CA3AF] flex items-center justify-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            {ui.t('جاري الاتصال بالوكلاء...', 'Connecting to the agents...')}
+          </div>
+        ) : (
+          <ol className="relative border-s-2 border-[#E3EDEF] dark:border-[#1B3540] ms-1.5 space-y-3">
+            {entries.map((e, i) => {
+              const [ar, en] = STAGE_NAMES[e.stage];
+              const latest = i === entries.length - 1 && running;
+              return (
+                <li key={i} className="ps-5 relative sa-animate-in">
+                  <span
+                    className={`absolute -start-[7px] top-1.5 w-3 h-3 rounded-full ring-4 ${dot(e.tone)} ${latest ? 'animate-pulse' : ''}`}
+                    aria-hidden="true"
+                  />
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="text-xs font-bold text-[#0F2A2E] dark:text-[#ECF6F8]">{ui.t(ar, en)}</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                        e.tone === 'done'
+                          ? 'bg-[#047857]/10 text-[#047857] dark:text-[#10B981]'
+                          : e.tone === 'failed'
+                            ? 'bg-[#DC2626]/10 text-[#DC2626] dark:text-[#FCA5A5]'
+                            : 'bg-[#0E7490]/10 text-[#0E7490] dark:text-[#22D3EE]'
+                      }`}
+                    >
+                      {e.tone === 'done' ? ui.t('اكتمل', 'Done') : e.tone === 'failed' ? ui.t('تعذّر', 'Failed') : ui.t('بدأ العمل', 'Working')}
+                    </span>
+                    <span className="text-[10px] font-mono-tabular text-[#8CA3AF]">{e.time}</span>
+                  </div>
+                  {!/^[a-z_]+\s+(working|completed|started|done)\.?$/i.test(e.message) && (
+                    <p className="text-[11px] text-[#5B6B7A] dark:text-[#8CA3AF] leading-relaxed break-words mt-0.5">
+                      <bdi>{e.message}</bdi>
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+
+      {pipelineId && (
+        <div className="pt-3 border-t border-[#E3EDEF] dark:border-[#1B3540] text-[10px] text-[#8CA3AF] flex items-center gap-1.5">
+          <Clock className="w-3 h-3" />
+          <span>{ui.t('معرّف التحليل', 'Analysis ID')}:</span>
+          <span className="font-mono-tabular" dir="ltr">{pipelineId}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const AiWizardScreen: React.FC = () => {
   const core = useAppCore();
   const { ui } = core;
@@ -724,7 +890,18 @@ export const AiWizardScreen: React.FC = () => {
                       <h3 className="text-sm font-extrabold text-[#0F2A2E] dark:text-[#ECF6F8]">{ui.t(agent.nameAr, agent.nameEn)}</h3>
                       <div className="text-[11px] text-[#5B6B7A] dark:text-[#8CA3AF]">{ui.t(agent.roleAr, agent.roleEn)}</div>
                       <p className="text-xs text-[#0F2A2E] dark:text-[#ECF6F8] pt-2 border-t border-[#D7E3E6] dark:border-[#1B3540] leading-relaxed min-h-[2.5rem]">
-                        {ui.t(agent.outputAr, agent.outputEn) || <span className="text-[#5B6B7A] dark:text-[#8CA3AF]">—</span>}
+                        {(() => {
+                          const out = ui.t(agent.outputAr, agent.outputEn);
+                          // bare status echoes ("prevention working") add nothing next to the status badge
+                          if (out && !/^[a-z_]+\s+(working|completed|started|done)\.?$/i.test(out)) return out;
+                          return isRunning ? (
+                            <span className="text-[#0E7490] dark:text-[#22D3EE]">{ui.t('يحلّل بيانات الحالة الآن...', 'Analysing the case now...')}</span>
+                          ) : isDone ? (
+                            <span className="text-[#047857] dark:text-[#10B981]">{ui.t('أنهى مهمته بنجاح.', 'Finished its task.')}</span>
+                          ) : (
+                            <span className="text-[#5B6B7A] dark:text-[#8CA3AF]">—</span>
+                          );
+                        })()}
                       </p>
                     </div>
                     <div className="space-y-1">
@@ -745,32 +922,16 @@ export const AiWizardScreen: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-5 rounded-2xl border border-[#D7E3E6] dark:border-[#1B3540] bg-[#091318] text-slate-200 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-mono-tabular font-bold text-[#22D3EE] flex items-center gap-2">
-                {wiz.running && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {ui.t('سجل نشاط الوكلاء المباشر', 'Live agent activity log')}
-                {wiz.pipelineId && <span className="text-slate-500">· {wiz.pipelineId}</span>}
-              </span>
-              {wiz.report && (
-                <button type="button" onClick={() => core.setWizardStep(4)} className="h-10 px-4 rounded-lg bg-[#0E7490] hover:bg-[#0B5C73] text-white text-xs font-bold cursor-pointer flex items-center gap-1.5">
-                  {ui.t('عرض حزمة القرار السريري', 'Open Clinical Decision Package')}
-                  <NextIcon className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            <div ref={logRef} dir="ltr" className="font-mono-tabular text-xs space-y-1.5 text-slate-300 max-h-64 overflow-y-auto text-left">
-              {wiz.activityLogs.length === 0 ? (
-                <div className="text-slate-500">{ui.t('بانتظار أول حدث من الخادم...', 'Waiting for the first server event...')}</div>
-              ) : (
-                wiz.activityLogs.map((line, i) => (
-                  <div key={i} className={line.includes('ERROR') ? 'text-red-300' : ''}>
-                    {line}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <PipelineTimeline
+            logs={wiz.activityLogs}
+            agents={wiz.agents}
+            running={wiz.running}
+            failed={!!wiz.error}
+            pipelineId={wiz.pipelineId}
+            logRef={logRef}
+            onOpenReport={wiz.report ? () => core.setWizardStep(4) : undefined}
+            NextIcon={NextIcon}
+          />
         </div>
       )}
 
@@ -865,10 +1026,19 @@ const DecisionPackage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {wiz.pdfUrl ? (
-            <a href={wiz.pdfUrl} download className="h-10 px-4 rounded-[10px] bg-[#0E7490] hover:bg-[#0B5C73] text-white text-xs font-bold flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const url = wiz.pdfUrl as string;
+                downloadFile(url, decodeURIComponent(url.split('/').pop() || 'report.pdf')).catch(() =>
+                  core.toast('error', 'تعذّر تحميل التقرير.', 'Report download failed.')
+                );
+              }}
+              className="h-10 px-4 rounded-[10px] bg-[#0E7490] hover:bg-[#0B5C73] text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
+            >
               <Download className="w-3.5 h-3.5" />
               <span>{ui.t('تحميل التقرير PDF', 'Download PDF report')}</span>
-            </a>
+            </button>
           ) : (
             <span className="text-xs text-[#5B6B7A] dark:text-[#8CA3AF]">{ui.t('ملف PDF غير متوفر', 'PDF not available')}</span>
           )}
